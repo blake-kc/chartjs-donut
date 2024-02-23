@@ -1,50 +1,71 @@
 import {
   ArcElement as ChartJSArcElement,
-  ArcOptions,
-  ArcProps,
+  ArcOptions as ChartJSArcOptions,
+  ArcProps as ChartJSArcProps,
+  Color as ChartJSColor,
   Chart as ChartJS,
   ChartData as ChartJSData,
+  DoughnutController as ChartJSDoughnutController,
   Element as ChartJSElement,
   Plugin as ChartJSPlugin,
 } from "chart.js";
-import { AnyObject } from "chart.js/types/basic";
+import { AnyObject as ChartJSAnyObject } from "chart.js/types/basic";
 import { Doughnut } from "react-chartjs-2";
 
 ChartJS.register(ChartJSArcElement);
 
+const colors: ChartJSColor[] = ["blue", "red", "green", "yellow"];
 const data: ChartJSData<"doughnut"> = {
-  labels: ["blue", "red"],
+  labels: colors,
   datasets: [
     {
-      data: [500, 100],
-      backgroundColor: ["blue", "red"],
+      data: [500, 100, 300, 250],
+      backgroundColor: colors,
+      borderWidth: 0,
     },
   ],
 };
 
-type RoundedArc = ChartJSElement<
-  AnyObject | ArcProps,
-  AnyObject | ArcOptions
-> & { round?: any };
+interface Round {
+  x: number;
+  y: number;
+  radius: number;
+  arcColor: ChartJSColor;
+}
+
+type CustomElement =
+  | (ChartJSElement<
+      ChartJSAnyObject | ChartJSArcProps,
+      ChartJSAnyObject | ChartJSArcOptions
+    > & {
+      round?: Round;
+    })
+  | (ChartJSArcElement<ChartJSArcProps, ChartJSArcOptions> & {
+      round?: Round;
+    });
 
 const plugins: ChartJSPlugin<"doughnut">[] = [
   {
-    id: "roundedCorners",
-    afterUpdate: function (chart, args, option) {
+    id: "arcCaps",
+    afterUpdate: function (chart) {
       // we only expect 1 dataset
       const { data, controller } = chart.getDatasetMeta(0);
+      const { outerRadius, innerRadius } =
+        controller as ChartJSDoughnutController;
+
       for (let i = data.length - 1; i >= 0; --i) {
-        // todo: investigate this
-        // if (Number(i) == data.length - 1) continue;
-        const arc = chart.getDatasetMeta(0).data[i];
-        const radiusLength = controller.outerRadius - controller.innerRadius;
+        const arc: CustomElement = data[i];
+
+        // determine total radius by diffing outer values
+        const radiusLength = outerRadius - innerRadius;
 
         arc.round = {
+          // chart's x/y lengths
           x: (chart.chartArea.left + chart.chartArea.right) / 2,
           y: (chart.chartArea.top + chart.chartArea.bottom) / 2,
-          radius: controller.innerRadius + radiusLength / 2,
-          thickness: radiusLength / 2 - 1,
-          backgroundColor: arc.options.backgroundColor,
+          // radius of a single arc
+          radius: innerRadius + radiusLength / 2,
+          arcColor: arc.options.backgroundColor as ChartJSColor,
         };
       }
     },
@@ -56,27 +77,51 @@ const plugins: ChartJSPlugin<"doughnut">[] = [
       const { data } = chart.getDatasetMeta(0);
 
       // iterate through each arc's data point
-      for (var i = data.length - 1; i >= 0; --i) {
-        // todo investigate this
-        if (Number(i) == data.length - 1) continue;
-        var arc = data[i];
+      for (let i = data.length - 1; i >= 0; --i) {
+        // extract data
+        const arc: CustomElement = data[i];
+        const round = arc.round as Round;
+        const props = (
+          arc as ChartJSArcElement<ChartJSArcProps, ChartJSArcOptions>
+        ).getProps([
+          "startAngle",
+          "endAngle",
+          "innerRadius",
+          "outerRadius",
+          "circumference",
+        ]);
 
-        var startAngle = Math.PI / 2 - arc.startAngle;
-        var endAngle = Math.PI / 2 - arc.endAngle;
+        // determine end angle of arc within the donut shape
+        const endAngle = Math.PI / 2 - props.endAngle;
 
         ctx.save();
-        ctx.translate(arc.round.x, arc.round.y);
+        ctx.translate(round.x, round.y);
 
-        ctx.fillStyle = arc.round.backgroundColor;
-
+        // generate white arc that serves as padding (assumes background is white)
+        ctx.fillStyle = "white";
         ctx.beginPath();
-
         ctx.arc(
-          arc.round.radius * Math.sin(endAngle),
-          arc.round.radius * Math.cos(endAngle),
-          arc.round.thickness,
+          round.radius * Math.sin(endAngle),
+          round.radius * Math.cos(endAngle),
+          // twice as wide to smooth out the padding's angles
+          props.outerRadius - props.innerRadius,
+          // cap should "face" outward from arc's outer boundary
+          0 + props.endAngle,
+          Math.PI + props.endAngle
+        );
+        ctx.closePath();
+        ctx.fill();
+
+        // generate cap
+        ctx.fillStyle = round.arcColor;
+        ctx.beginPath();
+        ctx.arc(
+          round.radius * Math.sin(endAngle),
+          round.radius * Math.cos(endAngle),
+          (props.outerRadius - props.innerRadius) / 2,
+          // draw a full circle for the cap to prevent any spacing issue
           0,
-          2 * Math.PI
+          Math.PI * 2
         );
         ctx.closePath();
         ctx.fill();
@@ -87,7 +132,7 @@ const plugins: ChartJSPlugin<"doughnut">[] = [
   },
 ];
 
-function App() {
+export default function App() {
   return (
     <div>
       <Doughnut
@@ -104,19 +149,10 @@ function App() {
             legend: { display: false },
           },
           elements: {
-            // arc: {
-            //   borderRadius: {
-            //     outerStart: 0,
-            //     innerStart: 0,
-            //     outerEnd: 4,
-            //     innerEnd: 4,
-            //   },
-            // },
+            arc: { borderWidth: 0 },
           },
         }}
       />
     </div>
   );
 }
-
-export default App;
